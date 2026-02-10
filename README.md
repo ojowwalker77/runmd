@@ -4,6 +4,17 @@ Interactive terminal markdown viewer with executable shell code blocks.
 
 Render any markdown file in your terminal with syntax highlighting, then run the shell commands right inside it.
 
+
+
+
+
+
+https://github.com/user-attachments/assets/79d30b91-013c-47db-96e8-e8b2d52565ec
+
+
+
+
+
 ## Install
 
 ```bash
