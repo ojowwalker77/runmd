@@ -3,7 +3,7 @@ import { resolve } from "path"
 const pkg = await Bun.file(resolve(import.meta.dir, "../../package.json")).json()
 export const VERSION: string = pkg.version
 
-const GITHUB_REPO = "ojowwalker77/runmd-"
+const GITHUB_REPO = "ojowwalker77/runmd"
 
 export async function checkForUpdate(current: string): Promise<string | null> {
   try {

@@ -5,7 +5,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ojowwalker77/runmd-.git"
+    "url": "https://github.com/ojowwalker77/runmd.git"
   },
   "bin": {
     "runmd": "./bin/runmd.ts"

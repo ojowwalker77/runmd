@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/79d30b91-013c-47db-96e8-e8b2d52565ec
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ojowwalker77/runmd-/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ojowwalker77/runmd/main/install.sh | bash
 ```
 
 Or with Bun directly:
@@ -30,8 +30,8 @@ bun install -g runmd
 Or from source:
 
 ```bash
-git clone https://github.com/ojowwalker77/runmd-.git
-cd runmd-
+git clone https://github.com/ojowwalker77/runmd.git
+cd runmd
 bun install
 bun run install-global
 ```

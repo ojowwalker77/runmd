@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="ojowwalker77/runmd-"
+REPO="ojowwalker77/runmd"
 INSTALL_DIR="$HOME/.runmd"
 
 # Check for bun
@@ -17,11 +17,11 @@ LATEST=$(curl -sL "https://api.github.com/repos/$REPO/releases/latest" | grep '"
 if [ -z "$LATEST" ]; then
   echo "Could not fetch latest release. Installing from main branch..."
   ARCHIVE_URL="https://github.com/$REPO/archive/refs/heads/main.tar.gz"
-  STRIP_DIR="runmd--main"
+  STRIP_DIR="runmd-main"
 else
   echo "Installing runmd $LATEST..."
   ARCHIVE_URL="https://github.com/$REPO/archive/refs/tags/$LATEST.tar.gz"
-  STRIP_DIR="runmd--${LATEST#v}"
+  STRIP_DIR="runmd-${LATEST#v}"
 fi
 
 # Download and extract
