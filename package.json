@@ -1,0 +1,28 @@
+{
+  "name": "runmd",
+  "version": "0.1.0",
+  "module": "src/index.tsx",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ojowwalker77/runmd-.git"
+  },
+  "bin": {
+    "runmd": "./bin/runmd.ts"
+  },
+  "scripts": {
+    "start": "bun run bin/runmd.ts",
+    "install-global": "bun scripts/install.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.1.77",
+    "@opentui/react": "^0.1.77",
+    "@types/react": "^19.2.13"
+  }
+}
