@@ -13,10 +13,6 @@
 
 - **Environment variables hidden in UI** — `${VAR_NAME}` placeholders are now displayed as-is in code blocks instead of showing substituted values; variables are only resolved at execution time
 
-### Developer Experience
-
-- **CI workflow** — GitHub Actions pipeline for automated testing on push/PR
-
 ## v0.1.0
 
 Initial release.
