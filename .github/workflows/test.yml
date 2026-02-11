@@ -21,7 +21,7 @@ jobs:
         run: bun test
 
       - name: Test headless runner
-        run: bun run bin/runmd.ts run example.md
+        run: bun run bin/runmd.ts run tests/fixtures/test.md
 
   action:
     runs-on: ubuntu-latest
@@ -36,5 +36,4 @@ jobs:
         run: bun install
 
       - name: Test action locally
-        shell: bash
-        run: bun run bin/runmd.ts run example.md
+        run: bun run bin/runmd.ts run tests/fixtures/test.md
