@@ -1,0 +1,47 @@
+name: 'Run Markdown'
+description: 'Execute shell code blocks from markdown files in CI'
+author: 'ojowwalker77'
+
+branding:
+  icon: 'play'
+  color: 'purple'
+
+inputs:
+  file:
+    description: 'Path to markdown file'
+    required: true
+  fail-fast:
+    description: 'Stop on first failure'
+    required: false
+    default: 'false'
+  blocks:
+    description: 'Comma-separated block indices to run (e.g., "0,2,5")'
+    required: false
+  bun-version:
+    description: 'Bun version to install'
+    required: false
+    default: 'latest'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: ${{ inputs.bun-version }}
+
+    - name: Install runmd
+      shell: bash
+      run: bun install -g runmd@latest
+
+    - name: Run markdown
+      shell: bash
+      run: |
+        ARGS="run ${{ inputs.file }}"
+        if [ "${{ inputs.fail-fast }}" = "true" ]; then
+          ARGS="$ARGS --fail-fast"
+        fi
+        if [ -n "${{ inputs.blocks }}" ]; then
+          ARGS="$ARGS --blocks ${{ inputs.blocks }}"
+        fi
+        runmd $ARGS

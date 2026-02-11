@@ -16,13 +16,13 @@ import {
   type TextareaRenderable,
 } from "@opentui/core"
 import type { Token, Tokens } from "marked"
-import { execShell } from "./lib/exec"
+import { execShellStreaming } from "./lib/exec"
+import { substituteEnv } from "./lib/env"
 import { checkForUpdate } from "./lib/version"
+import { SHELL_LANGS } from "./lib/constants"
 import { resolve } from "path"
 
 type Mode = "normal" | "insert"
-
-const SHELL_LANGS = new Set(["sh", "bash", "shell", "zsh"])
 
 const syntaxStyle = SyntaxStyle.fromStyles({
   default: { fg: parseColor("#b0b0b0") },
@@ -64,8 +64,11 @@ class RunBlockRenderable extends BoxRenderable {
   private _headerText: TextRenderable
   private _codeBox: BoxRenderable
   private _outputBox: BoxRenderable | null = null
+  private _outputCode: CodeRenderable | null = null
 
   private _env: Record<string, string>
+  private _syntaxStyle: SyntaxStyle
+  private _treeSitterClient?: any
 
   constructor(ctx: RenderContext, opts: {
     id: string
@@ -87,6 +90,8 @@ class RunBlockRenderable extends BoxRenderable {
     this._lang = opts.lang
     this._cwd = opts.cwd
     this._env = opts.env
+    this._syntaxStyle = opts.syntaxStyle
+    this._treeSitterClient = opts.treeSitterClient
     this._focusable = true
 
     this._headerText = new TextRenderable(ctx, {
@@ -135,21 +140,28 @@ class RunBlockRenderable extends BoxRenderable {
 
   private async execute() {
     this._state = "running"
+    this._output = ""
     this.updateHeader()
+    this.createOutputBox()
+    this.requestRender()
 
     try {
-      const result = await execShell(this._code, this._cwd, this._env)
+      const command = substituteEnv(this._code, this._env)
+      const result = await execShellStreaming(command, this._cwd, {
+        onData: (chunk) => {
+          this._output += chunk
+          this.updateOutputDisplay()
+        },
+      }, this._env)
       this._exitCode = result.exitCode
-      this._output = result.stdout || result.stderr
-      this._state = "done"
     } catch (e: any) {
       this._exitCode = 1
-      this._output = e.message || "Execution failed"
-      this._state = "done"
+      this._output += e.message || "Execution failed"
     }
 
+    this._state = "done"
     this.updateHeader()
-    this.showOutput()
+    this.finalizeOutput()
     this.requestRender()
   }
 
@@ -173,15 +185,10 @@ class RunBlockRenderable extends BoxRenderable {
     }
   }
 
-  private showOutput() {
+  private createOutputBox() {
     if (this._outputBox) {
       this.remove(this._outputBox.id)
     }
-
-    if (!this._output.trim()) return
-
-    const trimmed = this._output.replace(/\n$/, "")
-    const ok = this._exitCode === 0
 
     this._outputBox = new BoxRenderable(this.ctx, {
       id: `${this.id}-output`,
@@ -190,21 +197,86 @@ class RunBlockRenderable extends BoxRenderable {
       marginTop: 0,
       paddingLeft: 1,
       border: ["left"],
-      borderColor: ok ? parseColor("#1a1a1a") : parseColor("#ff5555"),
+      borderColor: parseColor("#1a1a1a"),
     })
 
-    this._outputBox.add(new TextRenderable(this.ctx, {
-      id: `${this.id}-output-text`,
-      content: new StyledText([{
-        __isChunk: true,
-        text: trimmed,
-        fg: ok ? parseColor("#666666") : parseColor("#ff5555"),
-        attributes: 0,
-      }]),
+    this._outputCode = new CodeRenderable(this.ctx, {
+      id: `${this.id}-output-code`,
+      content: "",
+      syntaxStyle: this._syntaxStyle,
+      treeSitterClient: this._treeSitterClient,
+      drawUnstyledText: true,
       width: "100%",
-    }))
+    })
 
+    this._outputBox.add(this._outputCode)
     this.add(this._outputBox)
+  }
+
+  private _filetypeDetected = false
+
+  private detectFiletype(text: string): string | undefined {
+    const t = text.trimStart()
+    if (t.startsWith("{") || t.startsWith("[")) return "javascript"
+    if (t.startsWith("<")) return "html"
+    return undefined
+  }
+
+  private prettyPrint(text: string, filetype: string | undefined): string {
+    if (filetype !== "javascript") return text
+    try {
+      return JSON.stringify(JSON.parse(text), null, 2)
+    } catch {
+      return text
+    }
+  }
+
+  private updateOutputDisplay() {
+    if (!this._outputCode) return
+    const trimmed = this._output.replace(/\n$/, "")
+    if (!trimmed) return
+
+    if (!this._filetypeDetected) {
+      const ft = this.detectFiletype(trimmed)
+      if (ft) {
+        this._outputCode.filetype = ft
+        this._filetypeDetected = true
+      }
+    }
+
+    this._outputCode.content = trimmed
+    this.requestRender()
+  }
+
+  private finalizeOutput() {
+    if (!this._output.trim()) {
+      // No output — remove the empty box
+      if (this._outputBox) {
+        this.remove(this._outputBox.id)
+        this._outputBox = null
+        this._outputCode = null
+      }
+      return
+    }
+
+    const ok = this._exitCode === 0
+    const trimmed = this._output.replace(/\n$/, "")
+    const filetype = this.detectFiletype(trimmed)
+    const formatted = this.prettyPrint(trimmed, filetype)
+
+    if (this._outputCode) {
+      if (filetype) this._outputCode.filetype = filetype
+      if (!ok) {
+        this._outputCode.fg = parseColor("#ff5555")
+      }
+      this._outputCode.content = formatted
+    }
+
+    if (this._outputBox) {
+      this._outputBox.borderColor = ok ? parseColor("#1a1a1a") : parseColor("#ff5555")
+    }
+
+    this._filetypeDetected = false
   }
 
   public override focus(): void {
