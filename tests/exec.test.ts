@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test"
-import { execShell, execShellStreaming } from "../src/lib/exec"
+import { execShell, execShellStreaming, execShellWithHandle, execShellStreamingWithHandle, killAllProcesses, installSignalHandlers } from "../src/lib/exec"
 
 describe("execShell", () => {
   test("executes simple command and captures stdout", async () => {
@@ -101,5 +101,52 @@ describe("execShellStreaming", () => {
 
     expect(result.exitCode).toBe(0)
     expect(chunks.join("")).toBe("")
+  })
+})
+
+describe("execShellWithHandle", () => {
+  test("kill terminates a running process", async () => {
+    const handle = execShellWithHandle("sleep 60", process.cwd())
+    handle.kill()
+    const result = await handle.result
+    expect(result.exitCode).not.toBe(0)
+  })
+
+  test("returns same result as execShell for normal commands", async () => {
+    const handle = execShellWithHandle("echo hello", process.cwd())
+    const result = await handle.result
+    expect(result.stdout.trim()).toBe("hello")
+    expect(result.exitCode).toBe(0)
+  })
+})
+
+describe("execShellStreamingWithHandle", () => {
+  test("kill terminates a running streaming process", async () => {
+    const chunks: string[] = []
+    const handle = execShellStreamingWithHandle("sleep 60", process.cwd(), {
+      onData: (chunk) => chunks.push(chunk),
+    })
+    handle.kill()
+    const result = await handle.result
+    expect(result.exitCode).not.toBe(0)
+  })
+})
+
+describe("killAllProcesses", () => {
+  test("kills all tracked processes", async () => {
+    const handle1 = execShellWithHandle("sleep 60", process.cwd())
+    const handle2 = execShellWithHandle("sleep 60", process.cwd())
+    killAllProcesses()
+    const [r1, r2] = await Promise.all([handle1.result, handle2.result])
+    expect(r1.exitCode).not.toBe(0)
+    expect(r2.exitCode).not.toBe(0)
+  })
+})
+
+describe("installSignalHandlers", () => {
+  test("is idempotent", () => {
+    // Should not throw when called multiple times
+    installSignalHandlers()
+    installSignalHandlers()
   })
 })

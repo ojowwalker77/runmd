@@ -16,10 +16,10 @@ import {
   type TextareaRenderable,
 } from "@opentui/core"
 import type { Token, Tokens } from "marked"
-import { execShellStreaming } from "./lib/exec"
+import { execShellStreamingWithHandle, killAllProcesses, type ExecHandle } from "./lib/exec"
 import { substituteEnv } from "./lib/env"
 import { checkForUpdate } from "./lib/version"
-import { SHELL_LANGS } from "./lib/constants"
+import { parseInfoString, isShellLang } from "./lib/parse-info"
 import { resolve } from "path"
 
 type Mode = "normal" | "insert"
@@ -57,15 +57,20 @@ const syntaxStyle = SyntaxStyle.fromStyles({
 class RunBlockRenderable extends BoxRenderable {
   private _code: string
   private _lang: string
+  private _name: string | undefined
   private _cwd: string
   private _state: "idle" | "running" | "done" = "idle"
   private _exitCode = 0
   private _output = ""
+  private _stderr = ""
   private _headerText: TextRenderable
   private _codeBox: BoxRenderable
   private _outputBox: BoxRenderable | null = null
   private _outputCode: CodeRenderable | null = null
+  private _stderrBox: BoxRenderable | null = null
+  private _stderrCode: CodeRenderable | null = null
 
+  private _handle: ExecHandle | null = null
   private _env: Record<string, string>
   private _syntaxStyle: SyntaxStyle
   private _treeSitterClient?: any
@@ -74,6 +79,7 @@ class RunBlockRenderable extends BoxRenderable {
     id: string
     code: string
     lang: string
+    name?: string
     cwd: string
     env: Record<string, string>
     syntaxStyle: SyntaxStyle
@@ -88,17 +94,19 @@ class RunBlockRenderable extends BoxRenderable {
 
     this._code = opts.code
     this._lang = opts.lang
+    this._name = opts.name
     this._cwd = opts.cwd
     this._env = opts.env
     this._syntaxStyle = opts.syntaxStyle
     this._treeSitterClient = opts.treeSitterClient
     this._focusable = true
 
+    const label = opts.name ? `${opts.lang}: ${opts.name}` : opts.lang
     this._headerText = new TextRenderable(ctx, {
       id: `${opts.id}-header`,
       content: new StyledText([
         { __isChunk: true, text: "▶ ", fg: parseColor("#666666"), attributes: 0 },
-        { __isChunk: true, text: opts.lang, fg: parseColor("#b0b0b0"), attributes: TextAttributes.BOLD },
+        { __isChunk: true, text: label, fg: parseColor("#b0b0b0"), attributes: TextAttributes.BOLD },
         { __isChunk: true, text: "  click block to focus, ", fg: parseColor("#444444"), attributes: 0 },
         { __isChunk: true, text: "enter", fg: parseColor("#666666"), attributes: TextAttributes.BOLD },
         { __isChunk: true, text: " to run", fg: parseColor("#444444"), attributes: 0 },
@@ -129,36 +137,58 @@ class RunBlockRenderable extends BoxRenderable {
     this.add(this._codeBox)
   }
 
+  get state() { return this._state }
+
   override handleKeyPress(key: KeyEvent): boolean {
     if (key.name === "return" && this._state !== "running") {
       this.execute()
       key.preventDefault()
       return true
     }
+    if (key.name === "c" && key.ctrl && this._state === "running") {
+      this.cancel()
+      key.preventDefault()
+      return true
+    }
     return false
+  }
+
+  cancel(): void {
+    if (this._state === "running" && this._handle) {
+      this._handle.kill()
+    }
   }
 
   private async execute() {
     this._state = "running"
     this._output = ""
+    this._stderr = ""
     this.updateHeader()
     this.createOutputBox()
     this.requestRender()
 
     try {
       const command = substituteEnv(this._code, this._env)
-      const result = await execShellStreaming(command, this._cwd, {
-        onData: (chunk) => {
-          this._output += chunk
-          this.updateOutputDisplay()
+      const handle = execShellStreamingWithHandle(command, this._cwd, {
+        onData: (chunk, stream) => {
+          if (stream === "stderr") {
+            this._stderr += chunk
+            this.updateStderrDisplay()
+          } else {
+            this._output += chunk
+            this.updateOutputDisplay()
+          }
         },
       }, this._env)
+      this._handle = handle
+      const result = await handle.result
       this._exitCode = result.exitCode
     } catch (e: any) {
       this._exitCode = 1
       this._output += e.message || "Execution failed"
     }
 
+    this._handle = null
     this._state = "done"
     this.updateHeader()
     this.finalizeOutput()
@@ -169,14 +199,17 @@ class RunBlockRenderable extends BoxRenderable {
     if (this._state === "running") {
       this._headerText.content = new StyledText([
         { __isChunk: true, text: "⟳ ", fg: parseColor("#f1fa8c"), attributes: 0 },
-        { __isChunk: true, text: "running...", fg: parseColor("#f1fa8c"), attributes: TextAttributes.ITALIC },
+        { __isChunk: true, text: "running...  ", fg: parseColor("#f1fa8c"), attributes: TextAttributes.ITALIC },
+        { __isChunk: true, text: "ctrl+c", fg: parseColor("#666666"), attributes: TextAttributes.BOLD },
+        { __isChunk: true, text: " cancel", fg: parseColor("#444444"), attributes: 0 },
       ])
       this._codeBox.borderColor = parseColor("#f1fa8c")
     } else if (this._state === "done") {
       const ok = this._exitCode === 0
+      const label = this._name ? `${this._lang}: ${this._name}` : this._lang
       this._headerText.content = new StyledText([
         { __isChunk: true, text: ok ? "✓ " : "✗ ", fg: ok ? parseColor("#50fa7b") : parseColor("#ff5555"), attributes: 0 },
-        { __isChunk: true, text: this._lang, fg: parseColor("#b0b0b0"), attributes: TextAttributes.BOLD },
+        { __isChunk: true, text: label, fg: parseColor("#b0b0b0"), attributes: TextAttributes.BOLD },
         { __isChunk: true, text: ok ? "  done" : `  exit ${this._exitCode}`, fg: ok ? parseColor("#444444") : parseColor("#ff5555"), attributes: 0 },
         { __isChunk: true, text: "  enter", fg: parseColor("#666666"), attributes: TextAttributes.BOLD },
         { __isChunk: true, text: " to re-run", fg: parseColor("#444444"), attributes: 0 },
@@ -188,6 +221,11 @@ class RunBlockRenderable extends BoxRenderable {
   private createOutputBox() {
     if (this._outputBox) {
       this.remove(this._outputBox.id)
+    }
+    if (this._stderrBox) {
+      this.remove(this._stderrBox.id)
+      this._stderrBox = null
+      this._stderrCode = null
     }
 
     this._outputBox = new BoxRenderable(this.ctx, {
@@ -211,6 +249,42 @@ class RunBlockRenderable extends BoxRenderable {
 
     this._outputBox.add(this._outputCode)
     this.add(this._outputBox)
+  }
+
+  private createStderrBox() {
+    this._stderrBox = new BoxRenderable(this.ctx, {
+      id: `${this.id}-stderr`,
+      flexDirection: "column",
+      width: "100%",
+      marginTop: 0,
+      paddingLeft: 1,
+      border: ["left"],
+      borderColor: parseColor("#ff5555"),
+    })
+
+    this._stderrCode = new CodeRenderable(this.ctx, {
+      id: `${this.id}-stderr-code`,
+      content: "",
+      syntaxStyle: this._syntaxStyle,
+      treeSitterClient: this._treeSitterClient,
+      drawUnstyledText: true,
+      width: "100%",
+      fg: parseColor("#ff5555"),
+    })
+
+    this._stderrBox.add(this._stderrCode)
+    this.add(this._stderrBox)
+  }
+
+  private updateStderrDisplay() {
+    if (!this._stderrBox) {
+      this.createStderrBox()
+    }
+    if (!this._stderrCode) return
+    const trimmed = this._stderr.replace(/\n$/, "")
+    if (!trimmed) return
+    this._stderrCode.content = trimmed
+    this.requestRender()
   }
 
   private _filetypeDetected = false
@@ -249,31 +323,41 @@ class RunBlockRenderable extends BoxRenderable {
   }
 
   private finalizeOutput() {
-    if (!this._output.trim()) {
-      // No output — remove the empty box
-      if (this._outputBox) {
-        this.remove(this._outputBox.id)
-        this._outputBox = null
-        this._outputCode = null
-      }
-      return
+    const hasStdout = this._output.trim().length > 0
+    const hasStderr = this._stderr.trim().length > 0
+
+    // Remove empty stdout box
+    if (!hasStdout && this._outputBox) {
+      this.remove(this._outputBox.id)
+      this._outputBox = null
+      this._outputCode = null
     }
 
-    const ok = this._exitCode === 0
-    const trimmed = this._output.replace(/\n$/, "")
-    const filetype = this.detectFiletype(trimmed)
-    const formatted = this.prettyPrint(trimmed, filetype)
+    // Remove empty stderr box
+    if (!hasStderr && this._stderrBox) {
+      this.remove(this._stderrBox.id)
+      this._stderrBox = null
+      this._stderrCode = null
+    }
 
-    if (this._outputCode) {
+    if (!hasStdout && !hasStderr) return
+
+    const ok = this._exitCode === 0
+
+    if (hasStdout && this._outputCode) {
+      const trimmed = this._output.replace(/\n$/, "")
+      const filetype = this.detectFiletype(trimmed)
+      const formatted = this.prettyPrint(trimmed, filetype)
       if (filetype) this._outputCode.filetype = filetype
-      if (!ok) {
-        this._outputCode.fg = parseColor("#ff5555")
-      }
       this._outputCode.content = formatted
     }
 
     if (this._outputBox) {
       this._outputBox.borderColor = ok ? parseColor("#1a1a1a") : parseColor("#ff5555")
+    }
+
+    if (hasStderr && this._stderrCode) {
+      this._stderrCode.content = this._stderr.replace(/\n$/, "")
     }
 
     this._filetypeDetected = false
@@ -294,33 +378,12 @@ class RunBlockRenderable extends BoxRenderable {
   }
 }
 
-// Track all RunBlock instances for focus cycling
-let runBlocks: RunBlockRenderable[] = []
-let focusIndex = -1
-
-function createRunBlock(
-  ctx: RenderContext,
-  token: Tokens.Code,
-  index: number,
-  cwd: string,
-  env: Record<string, string>,
-  style: SyntaxStyle,
-  treeSitterClient?: any,
-): RunBlockRenderable {
-  const block = new RunBlockRenderable(ctx, {
-    id: `runblock-${index}`,
-    code: token.text,
-    lang: token.lang || "sh",
-    cwd,
-    env,
-    syntaxStyle: style,
-    treeSitterClient,
-  })
-  runBlocks.push(block)
-  return block
+interface FocusState {
+  blocks: RunBlockRenderable[]
+  focusIndex: number
+  focusedDocIndex: number  // persisted across re-renders
+  counter: number
 }
-
-let blockCounter = 0
 
 export function App({ content: initialContent, filename, cwd, filePath, env, version }: {
   content: string
@@ -336,65 +399,93 @@ export function App({ content: initialContent, filename, cwd, filePath, env, ver
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null)
   const editorRef = useRef<TextareaRenderable | null>(null)
   const treeSitterClient = getTreeSitterClient()
+  const focus = useRef<FocusState>({ blocks: [], focusIndex: -1, focusedDocIndex: -1, counter: 0 })
 
   useEffect(() => {
-    runBlocks = []
-    focusIndex = -1
-    blockCounter = 0
+    focus.current.blocks = []
+    focus.current.focusIndex = -1
+    focus.current.focusedDocIndex = -1
+    focus.current.counter = 0
     checkForUpdate(version).then(setUpdateAvailable)
   }, [])
 
   const handleRenderNode = useCallback((token: Token, context: RenderNodeContext): Renderable | undefined | null => {
     if (token.type === "code") {
       const codeToken = token as Tokens.Code
-      const lang = (codeToken.lang || "").toLowerCase()
+      const meta = parseInfoString(codeToken.lang)
 
-      if (SHELL_LANGS.has(lang)) {
-        return createRunBlock(
-          renderer!,
-          codeToken,
-          blockCounter++,
+      if (isShellLang(meta)) {
+        const docIndex = focus.current.counter++
+        const block = new RunBlockRenderable(renderer!, {
+          id: `runblock-${docIndex}`,
+          code: codeToken.text,
+          lang: meta.lang || "sh",
+          name: meta.name,
           cwd,
           env,
-          context.syntaxStyle,
-          context.treeSitterClient,
-        )
+          syntaxStyle: context.syntaxStyle,
+          treeSitterClient: context.treeSitterClient,
+        })
+        focus.current.blocks.push(block)
+
+        // Restore focus if this block matches the previously focused doc index
+        if (docIndex === focus.current.focusedDocIndex) {
+          focus.current.focusIndex = focus.current.blocks.length - 1
+          queueMicrotask(() => block.focus())
+        }
+
+        return block
       }
     }
     return context.defaultRender()
   }, [cwd, renderer])
 
   useKeyboard((key) => {
+    const f = focus.current
+
     if (mode === "normal") {
+      if (key.name === "c" && key.ctrl) {
+        const focused = f.focusIndex >= 0 ? f.blocks[f.focusIndex] : null
+        if (focused && focused.state === "running") {
+          focused.cancel()
+        } else {
+          killAllProcesses()
+          renderer?.destroy()
+        }
+        key.preventDefault()
+        return
+      }
+
       if (key.name === "q" && !key.ctrl && !key.meta) {
+        killAllProcesses()
         renderer?.destroy()
       }
 
       if (key.name === "i") {
         key.preventDefault()
-        // Reset run blocks since we'll rebuild them on return
-        runBlocks = []
-        focusIndex = -1
-        blockCounter = 0
+        // Reset blocks but preserve focusedDocIndex for restoration
+        f.blocks = []
+        f.focusIndex = -1
+        f.counter = 0
         setMode("insert")
       }
 
-      if (key.name === "tab" && runBlocks.length > 0) {
+      if (key.name === "tab" && f.blocks.length > 0) {
         key.preventDefault()
-        if (focusIndex >= 0 && focusIndex < runBlocks.length) {
-          runBlocks[focusIndex]!.blur()
+        if (f.focusIndex >= 0 && f.focusIndex < f.blocks.length) {
+          f.blocks[f.focusIndex]!.blur()
         }
-        focusIndex = key.shift
-          ? (focusIndex - 1 + runBlocks.length) % runBlocks.length
-          : (focusIndex + 1) % runBlocks.length
-        runBlocks[focusIndex]!.focus()
+        f.focusIndex = key.shift
+          ? (f.focusIndex - 1 + f.blocks.length) % f.blocks.length
+          : (f.focusIndex + 1) % f.blocks.length
+        f.focusedDocIndex = f.focusIndex
+        f.blocks[f.focusIndex]!.focus()
       }
     }
 
     if (mode === "insert") {
       if (key.name === "escape") {
         key.preventDefault()
-        // Auto-save and switch back to normal mode
         if (editorRef.current) {
           const text = editorRef.current.editBuffer.getText()
           if (text !== content) {
@@ -402,9 +493,10 @@ export function App({ content: initialContent, filename, cwd, filePath, env, ver
             Bun.write(filePath, text)
           }
         }
-        runBlocks = []
-        focusIndex = -1
-        blockCounter = 0
+        // Reset blocks but preserve focusedDocIndex
+        f.blocks = []
+        f.focusIndex = -1
+        f.counter = 0
         setMode("normal")
       }
     }

@@ -38,11 +38,26 @@ bun run install-global
 
 ## Usage
 
+### Interactive (TUI)
+
 ```bash
 runmd <file.md>
 ```
 
 Shell code blocks (```bash, ```sh, ```zsh) become interactive — navigate to them with `Tab` and hit `Enter` to execute. Other code blocks render as syntax-highlighted read-only blocks.
+
+### Headless (CI/scripts)
+
+```bash
+runmd run <file.md> [options]
+```
+
+| Flag | Description |
+|---|---|
+| `--fail-fast` | Stop on first failure |
+| `--blocks 0,2,setup` | Run specific blocks by index or name |
+| `--timeout 30` | Kill blocks exceeding N seconds |
+| `--parallel` | Execute all blocks concurrently |
 
 ## Keybindings
 
@@ -52,6 +67,7 @@ Shell code blocks (```bash, ```sh, ```zsh) become interactive — navigate to th
 |---|---|
 | `Tab` / `Shift+Tab` | Cycle between shell blocks |
 | `Enter` | Run focused shell block |
+| `Ctrl+C` | Cancel running block, or quit |
 | `↑` / `↓` | Scroll |
 | `i` | Enter insert (edit) mode |
 | `q` | Quit |
@@ -64,11 +80,25 @@ Shell code blocks (```bash, ```sh, ```zsh) become interactive — navigate to th
 
 ## Features
 
-**Executable shell blocks** — Shell code blocks show a run indicator (`▶` idle, `⟳` running, `✓` success, `✗` error) and display output inline after execution.
+**Executable shell blocks** — Shell code blocks show a run indicator (`▶` idle, `⟳` running, `✓` success, `✗` error) and display output inline after execution. Stdout and stderr are displayed separately (stderr in red).
 
-**Inline editing** — Press `i` to edit the markdown source directly in the terminal. Changes are saved to disk on `Esc`.
+**Named blocks** — Add a name to any code fence to reference it by name:
 
-**Environment variables** — Loads `.env` from the markdown file's directory. Use `${VAR_NAME}` in your markdown and it gets substituted before rendering.
+````
+```bash name="setup"
+echo "installing dependencies"
+```
+````
+
+Named blocks display their name in the header and can be targeted with `--blocks setup` in headless mode.
+
+**Process cancellation** — Press `Ctrl+C` to cancel a running block without leaving the TUI. Long-running commands in headless mode can be capped with `--timeout`.
+
+**Parallel execution** — Run all blocks concurrently with `--parallel` in headless mode. Combine with `--fail-fast` to cancel remaining blocks on first failure.
+
+**Inline editing** — Press `i` to edit the markdown source directly in the terminal. Changes are saved to disk on `Esc`. Focus position is preserved across mode transitions.
+
+**Environment variables** — Loads `.env` from the markdown file's directory. Use `${VAR_NAME}` in your markdown and it gets substituted before rendering. Supports `export` prefix, multiline values, and escaped quotes.
 
 **Syntax highlighting** — Tree-sitter powered highlighting for code blocks in any language.
 

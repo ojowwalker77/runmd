@@ -1,3 +1,5 @@
+import type { Subprocess } from "bun"
+
 export interface ExecResult {
   stdout: string
   stderr: string
@@ -8,22 +10,67 @@ export interface StreamingExecOptions {
   onData: (chunk: string, stream: "stdout" | "stderr") => void
 }
 
+export interface ExecHandle {
+  result: Promise<ExecResult>
+  kill: () => void
+}
+
+// --- Process tracking ---
+
+const activeProcesses = new Set<Subprocess>()
+
+function trackProcess(proc: Subprocess): void {
+  activeProcesses.add(proc)
+  proc.exited.then(() => activeProcesses.delete(proc))
+}
+
+export function killAllProcesses(): void {
+  for (const proc of activeProcesses) {
+    try { proc.kill("SIGTERM") } catch {}
+  }
+  activeProcesses.clear()
+}
+
+let signalHandlersInstalled = false
+
+export function installSignalHandlers(): void {
+  if (signalHandlersInstalled) return
+  signalHandlersInstalled = true
+
+  const cleanup = () => {
+    killAllProcesses()
+    process.exit(130)
+  }
+
+  process.on("SIGINT", cleanup)
+  process.on("SIGTERM", cleanup)
+}
+
+// --- Execution ---
+
 export async function execShell(command: string, cwd: string, env?: Record<string, string>): Promise<ExecResult> {
+  return execShellWithHandle(command, cwd, env).result
+}
+
+export function execShellWithHandle(command: string, cwd: string, env?: Record<string, string>): ExecHandle {
   const proc = Bun.spawn(["sh", "-c", command], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env, ...env },
   })
+  trackProcess(proc)
 
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
+  const result = (async () => {
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    const exitCode = await proc.exited
+    return { stdout, stderr, exitCode }
+  })()
 
-  const exitCode = await proc.exited
-
-  return { stdout, stderr, exitCode }
+  return { result, kill: () => { try { proc.kill("SIGTERM") } catch {} } }
 }
 
 async function readStream(
@@ -64,18 +111,31 @@ export async function execShellStreaming(
   options: StreamingExecOptions,
   env?: Record<string, string>,
 ): Promise<ExecResult> {
+  return execShellStreamingWithHandle(command, cwd, options, env).result
+}
+
+export function execShellStreamingWithHandle(
+  command: string,
+  cwd: string,
+  options: StreamingExecOptions,
+  env?: Record<string, string>,
+): ExecHandle {
   const proc = Bun.spawn(["sh", "-c", command], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env, ...env },
   })
+  trackProcess(proc)
 
-  const [stdout, stderr, exitCode] = await Promise.all([
-    readStream(proc.stdout as ReadableStream<Uint8Array>, "stdout", options.onData),
-    readStream(proc.stderr as ReadableStream<Uint8Array>, "stderr", options.onData),
-    proc.exited,
-  ])
+  const result = (async () => {
+    const [stdout, stderr, exitCode] = await Promise.all([
+      readStream(proc.stdout as ReadableStream<Uint8Array>, "stdout", options.onData),
+      readStream(proc.stderr as ReadableStream<Uint8Array>, "stderr", options.onData),
+      proc.exited,
+    ])
+    return { stdout, stderr, exitCode }
+  })()
 
-  return { stdout, stderr, exitCode }
+  return { result, kill: () => { try { proc.kill("SIGTERM") } catch {} } }
 }

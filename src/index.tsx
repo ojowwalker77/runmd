@@ -5,11 +5,12 @@ import { resolve, dirname, basename } from "path"
 import { loadEnv } from "./lib/env"
 import { VERSION } from "./lib/version"
 import { runMarkdown } from "./runner"
+import { installSignalHandlers } from "./lib/exec"
 
 const args = process.argv.slice(2)
 
 if (args.length === 0) {
-  console.error(`runmd v${VERSION}\n\nUsage: runmd <file.md>\n       runmd run <file.md> [--fail-fast] [--blocks 0,2,5]`)
+  console.error(`runmd v${VERSION}\n\nUsage: runmd <file.md>\n       runmd run <file.md> [--fail-fast] [--blocks 0,2,setup] [--timeout 30] [--parallel]`)
   process.exit(1)
 }
 
@@ -19,18 +20,27 @@ if (args[0] === "run") {
   const fileArg = runArgs.find(a => !a.startsWith("--"))
 
   if (!fileArg) {
-    console.error("Usage: runmd run <file.md> [--fail-fast] [--blocks 0,2,5]")
+    console.error("Usage: runmd run <file.md> [--fail-fast] [--blocks 0,2,setup] [--timeout 30] [--parallel]")
     process.exit(1)
   }
 
+  installSignalHandlers()
   const failFast = runArgs.includes("--fail-fast")
+  const parallel = runArgs.includes("--parallel")
   const blocksIdx = runArgs.indexOf("--blocks")
   const blocks = blocksIdx !== -1 && runArgs[blocksIdx + 1]
-    ? runArgs[blocksIdx + 1]!.split(",").map(Number)
+    ? runArgs[blocksIdx + 1]!.split(",").map(b => {
+        const n = Number(b)
+        return Number.isNaN(n) ? b : n
+      })
+    : undefined
+  const timeoutIdx = runArgs.indexOf("--timeout")
+  const timeout = timeoutIdx !== -1 && runArgs[timeoutIdx + 1]
+    ? Number(runArgs[timeoutIdx + 1])
     : undefined
 
   try {
-    const result = await runMarkdown({ filePath: fileArg, failFast, blocks })
+    const result = await runMarkdown({ filePath: fileArg, failFast, blocks, timeout, parallel })
     process.exit(result.failed > 0 ? 1 : 0)
   } catch (e: any) {
     console.error(e.message)
@@ -53,7 +63,7 @@ const rawContent = await file.text()
 const env = await loadEnv(cwd)
 
 const renderer = await createCliRenderer({
-  exitOnCtrlC: true,
+  exitOnCtrlC: false,
   useMouse: true,
   useAlternateScreen: true,
 })

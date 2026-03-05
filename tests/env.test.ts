@@ -46,6 +46,39 @@ describe("loadEnv", () => {
     unlinkSync(join(dir, ".env"))
     rmdirSync(dir)
   })
+
+  test("strips export prefix", async () => {
+    const dir = join(import.meta.dir, "fixtures/tmp-export-test")
+    await Bun.write(join(dir, ".env"), 'export FOO=bar\nexport BAZ="quoted"\nREGULAR=yes\n')
+    const env = await loadEnv(dir)
+    expect(env.FOO).toBe("bar")
+    expect(env.BAZ).toBe("quoted")
+    expect(env.REGULAR).toBe("yes")
+    const { unlinkSync, rmdirSync } = await import("fs")
+    unlinkSync(join(dir, ".env"))
+    rmdirSync(dir)
+  })
+
+  test("handles escaped quotes in values", async () => {
+    const dir = join(import.meta.dir, "fixtures/tmp-escape-test")
+    await Bun.write(join(dir, ".env"), 'MSG="hello \\"world\\""\n')
+    const env = await loadEnv(dir)
+    expect(env.MSG).toBe('hello "world"')
+    const { unlinkSync, rmdirSync } = await import("fs")
+    unlinkSync(join(dir, ".env"))
+    rmdirSync(dir)
+  })
+
+  test("handles multiline quoted values", async () => {
+    const dir = join(import.meta.dir, "fixtures/tmp-multiline-test")
+    await Bun.write(join(dir, ".env"), 'MULTI="line1\nline2\nline3"\nAFTER=ok\n')
+    const env = await loadEnv(dir)
+    expect(env.MULTI).toBe("line1\nline2\nline3")
+    expect(env.AFTER).toBe("ok")
+    const { unlinkSync, rmdirSync } = await import("fs")
+    unlinkSync(join(dir, ".env"))
+    rmdirSync(dir)
+  })
 })
 
 describe("substituteEnv", () => {

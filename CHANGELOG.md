@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.3.0
+
+### Features
+
+- **Named code blocks** — Add metadata to code fences with `` ```bash name="setup" `` syntax; block names are displayed in the TUI header and can be referenced with `--blocks setup,cleanup`
+- **Process cancellation** — Press `Ctrl+C` to cancel a running block in the TUI instead of killing the app; the focused block's process is terminated and the TUI stays open
+- **Execution timeout** — New `--timeout <seconds>` flag for the headless runner to kill blocks that exceed a time limit
+- **Parallel execution** — New `--parallel` flag for the headless runner to execute all blocks concurrently; supports `--fail-fast` to cancel remaining blocks on first failure
+- **Separate stderr display** — stderr output now renders in a distinct red-bordered section below stdout, instead of being mixed together
+- **Improved .env parser** — Supports `export` prefix, multiline quoted values, and escaped quotes (`\"`, `\'`) inside values
+
+### Bug Fixes
+
+- **Focus preserved across mode transitions** — Switching between normal and insert mode no longer loses the focused block position
+
+### Internal
+
+- **Signal handling** — Spawned child processes are tracked and cleaned up on SIGINT/SIGTERM in headless mode, preventing zombie processes
+- **ExecHandle API** — New `execShellWithHandle()` and `execShellStreamingWithHandle()` functions that return a killable handle for process lifecycle management
+- **Info string parser** — New `src/lib/parse-info.ts` module for parsing code fence metadata, fixing a latent bug where `SHELL_LANGS.has()` would break on info strings with attributes
+
 ## v0.2.0
 
 ### Features
